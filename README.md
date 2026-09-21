@@ -7,9 +7,9 @@ Serve this directory with any static web server. The entry point is index.html. 
 
 ## Features
 - Original-style Scan, History, Users, and report screens
-- 40-second demo measurements and pulse waveform
+- 40-second live sensor measurements and pulse waveform; no simulated fallback
 - Session-only profiles, history, and CSV export
-- Experimental Web Bluetooth connection using the recovered device protocol
+- Web Bluetooth connection using FF01 commands, FF02 replies and FF03 measurement notifications from the recovered device protocol
 
 ## Limitations
 Bluetooth requires a supported browser and HTTPS (or localhost). Hardware integration has not been validated. The original sensor validity algorithm is not fully reproduced. Blood-pressure values are estimates calculated from heart rate, not blood-pressure measurements. No clinical score or diagnosis is provided.
