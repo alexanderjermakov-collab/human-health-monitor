@@ -84,12 +84,16 @@ function renderBluetoothDiagnostics(attempt=bluetoothAttempt){
   bluetoothObject:typeof navigator.bluetooth,
   getDevices:typeof navigator.bluetooth?.getDevices,
   requestDevice:typeof navigator.bluetooth?.requestDevice,
+  titanRpcBTRCPair:typeof window.RpcBTRCPair,
+  titanRpcSubscribe:typeof window.RpcSubscribe,
+  titanRpcBTStatus:typeof window.RpcBluetoothBTstatusGet,
+  titanServiceRegistry:typeof window.S,
   userAgent:navigator.userAgent,
   requestStatus:attempt.status,
   errorName:attempt.errorName||'—',
   errorMessage:attempt.errorMessage||'—'
  };
- const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
+ const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',titanRpcBTRCPair:'Titan RpcBTRCPair',titanRpcSubscribe:'Titan RpcSubscribe',titanRpcBTStatus:'Titan BT status RPC',titanServiceRegistry:'Titan service registry',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
  bluetoothDiagnostics.innerHTML='<h3>Browser / Bluetooth diagnostics</h3><div class="diagnosticRows">'+Object.entries(values).map(([key,value])=>`<div><span>${labels[key]}</span><strong>${esc(value)}</strong></div>`).join('')+'</div>';
  console.info('[HHM V8 Bluetooth diagnostics] '+JSON.stringify(values));
  return values;
