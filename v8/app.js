@@ -70,6 +70,7 @@ const uuid=n=>`0000${n}-0000-1000-8000-00805f9b34fb`;
 function receive(e){if(!running||waitingForAck)return;rx.push(...new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength));while(rx.length>=92){if(rx[0]!==170||rx[1]!==92||rx[2]!==16||rx[3]!==255){rx.shift();continue}const f=rx.slice(0,92);if((f.slice(0,91).reduce((s,v)=>s+v,0)&255)!==f[91]){rx.shift();continue}rx.splice(0,92);lastPacket=Date.now();samples.push(...f.slice(4,68).map(v=>v>127?v-256:v));samples=samples.slice(-512);if(!f[68]||!f[69]){display(null);$('waveLabel').textContent='Receiving pulse signal · calculating readings';$('sessionCopy').textContent='Keep your finger still on the sensor';notify('Sensor signal received. Waiting for heart rate and oxygen readings. Keep your finger covering the sensor.');continue}latest={hr:f[68],spo:f[69],micro:f[70],fatigue:f[71],hrv:f[79]};lastFrame=Date.now();sessionReadings.push({...latest});display(latest);$('sessionCopy').textContent='Receiving live sensor readings';$('waveLabel').textContent='Live sensor waveform';notify('Receiving measurements from '+(device?.name||'remote')+'. Blood-pressure values remain estimates.');}if(rx.length>4096)rx=[]}
 let permittedRemotes=[];
 let bluetoothAttempt={status:'Not started'};
+let titanRpcProbe={status:'Not started'};
 const bluetoothDiagnostics=document.createElement('section');
 bluetoothDiagnostics.id='bluetoothDiagnostics';
 $('remoteDialog').insertBefore(bluetoothDiagnostics,$('remoteHelp'));
@@ -88,17 +89,32 @@ function renderBluetoothDiagnostics(attempt=bluetoothAttempt){
   titanRpcSubscribe:typeof window.RpcSubscribe,
   titanRpcBTStatus:typeof window.RpcBluetoothBTstatusGet,
   titanServiceRegistry:typeof window.S,
+  titanRpcEndpoint:'ws://127.0.0.1:28001/jsonrpc',
+  titanRpcSocketStatus:titanRpcProbe.status,
+  titanRpcSocketError:titanRpcProbe.error||'—',
   userAgent:navigator.userAgent,
   requestStatus:attempt.status,
   errorName:attempt.errorName||'—',
   errorMessage:attempt.errorMessage||'—'
  };
- const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',titanRpcBTRCPair:'Titan RpcBTRCPair',titanRpcSubscribe:'Titan RpcSubscribe',titanRpcBTStatus:'Titan BT status RPC',titanServiceRegistry:'Titan service registry',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
+ const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',titanRpcBTRCPair:'Titan RpcBTRCPair',titanRpcSubscribe:'Titan RpcSubscribe',titanRpcBTStatus:'Titan BT status RPC',titanServiceRegistry:'Titan service registry',titanRpcEndpoint:'Titan RPC endpoint',titanRpcSocketStatus:'Titan RPC socket',titanRpcSocketError:'Titan RPC socket error',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
  bluetoothDiagnostics.innerHTML='<h3>Browser / Bluetooth diagnostics</h3><div class="diagnosticRows">'+Object.entries(values).map(([key,value])=>`<div><span>${labels[key]}</span><strong>${esc(value)}</strong></div>`).join('')+'</div>';
  console.info('[HHM V8 Bluetooth diagnostics] '+JSON.stringify(values));
  return values;
 }
 renderBluetoothDiagnostics();
+function probeTitanRpc(){
+ let socket,settled=false;
+ titanRpcProbe={status:'Connecting'};renderBluetoothDiagnostics();
+ try{
+  socket=new WebSocket('ws://127.0.0.1:28001/jsonrpc');
+  socket.onopen=()=>{settled=true;titanRpcProbe={status:'Open'};renderBluetoothDiagnostics();console.info('[HHM V8 Titan RPC probe] WebSocket open');socket.close()};
+  socket.onerror=()=>{if(settled)return;settled=true;titanRpcProbe={status:'Failed',error:'WebSocket error event'};renderBluetoothDiagnostics();console.error('[HHM V8 Titan RPC probe] WebSocket error')};
+  socket.onclose=e=>{if(settled)return;settled=true;titanRpcProbe={status:'Closed before open',error:'code '+e.code};renderBluetoothDiagnostics()};
+  setTimeout(()=>{if(settled)return;settled=true;titanRpcProbe={status:'Timed out',error:'No open event after 3 seconds'};renderBluetoothDiagnostics();try{socket.close()}catch(e){}},3000);
+ }catch(e){settled=true;titanRpcProbe={status:'Blocked',error:(e.name||'Error')+': '+(e.message||String(e))};renderBluetoothDiagnostics();console.error('[HHM V8 Titan RPC probe] '+titanRpcProbe.error)}
+}
+probeTitanRpc();
 async function connect(){
  if(running)return notify('Finish or cancel the measurement before connecting.');
  if(connected){device.gatt.disconnect();return}
