@@ -3,9 +3,11 @@ const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>
 const users=[{id:'default',name:'Default profile',age:'—',gender:'Not specified',height:'—',weight:'—'}], reports=[];let active='default',running=false,timer=null,seconds=40,connected=false,device=null,writer=null,rx=[],samples=[],lastFrame=0,latest=null,sessionReadings=[];
 $('date').textContent=new Date().toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
 function notify(t){$('notice').textContent=t}function navigate(page){if(!['monitor','reports','users','about'].includes(page))throw Error('Unknown page');document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==page);document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('pageTitle').textContent={monitor:'Human Sensor Health Monitor',reports:'History',users:'Users',about:'About'}[page];$('reportDetail').hidden=true;if(page==='reports')renderReports()}
+function openDialog(dialog){if(typeof dialog==='string')dialog=$(dialog);if(typeof dialog.showModal==='function'){if(!dialog.open)dialog.showModal()}else{dialog.setAttribute('open','');dialog.classList.add('dialogFallback')}}
+function closeDialog(dialog){if(typeof dialog==='string')dialog=$(dialog);if(typeof dialog.close==='function')dialog.close();else{dialog.removeAttribute('open');dialog.classList.remove('dialogFallback')}}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
 function renderUsers(){$('profile').innerHTML=users.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');$('profile').value=active;$('userCards').innerHTML=users.map(u=>`<article class="usercard ${u.id===active?'selected':''}"><div class="avatar">${esc(u.name[0].toUpperCase())}</div><div class="userInfo"><h2>${esc(u.name)}</h2><p>${esc(u.gender)} · Age ${esc(u.age||'—')}</p><p>${esc(u.height||'—')} cm · ${esc(u.weight||'—')} kg</p></div><button data-user="${u.id}">${u.id===active?'Active':'Select'}</button></article>`).join('');document.querySelectorAll('[data-user]').forEach(b=>b.onclick=()=>{if(running)return notify('Finish or cancel the current measurement before changing profiles.');active=b.dataset.user;renderUsers()})}
-$('profile').onchange=()=>{active=$('profile').value;renderUsers()};$('addUser').onclick=()=>$('userDialog').showModal();$('cancelUser').onclick=()=>$('userDialog').close();$('userForm').onsubmit=e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));if(!d.name.trim())return;users.push({...d,name:d.name.trim(),id:crypto.randomUUID()});if(!running)active=users.at(-1).id;renderUsers();e.target.reset();$('userDialog').close()};
+$('profile').onchange=()=>{active=$('profile').value;renderUsers()};$('addUser').onclick=()=>openDialog('userDialog');$('cancelUser').onclick=()=>closeDialog('userDialog');$('userForm').onsubmit=e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));if(!d.name.trim())return;users.push({...d,name:d.name.trim(),id:crypto.randomUUID()});if(!running)active=users.at(-1).id;renderUsers();e.target.reset();closeDialog('userDialog')};
 function pressure(v){return [Math.max(90,Math.min(160,Math.trunc(110+1.5*(v.hr-80)))),Math.max(60,Math.min(100,Math.trunc(70+.9*(v.hr-80))))]}
 function display(v){for(const k of ['hr','spo','hrv','micro','fatigue'])$(k).textContent=v?v[k]:(['hr','spo'].includes(k)?'00':'--');const bp=v?pressure(v):['--','--'];$('sys').textContent=bp[0];$('dia').textContent=bp[1];$('bp').textContent=bp.join(' / ')}
 async function command(cmd,sec){if(!writer)throw Error('Sensor is not connected.');let a=sec===undefined?[170,4,cmd]:[170,5,cmd,sec];a.push(a.reduce((x,y)=>x+y,0)&255);if(writer.properties.writeWithoutResponse)await writer.writeValueWithoutResponse(new Uint8Array(a));else if(writer.properties.write)await writer.writeValueWithResponse(new Uint8Array(a));else throw Error('Remote command channel is not writable.')}
@@ -14,10 +16,10 @@ async function start(){
  if(starting)return;
  if(running){await finish(false);return}
  if(!connected||!device?.gatt.connected||!writer){notify('Pair remote first. Scanning requires a live sensor connection.');return}
- $('scanDialog').showModal();
+ openDialog('scanDialog');
 }
 async function beginScan(){
- $('scanDialog').close();
+ closeDialog('scanDialog');
  if(running||starting)return;
  if(!connected||!device?.gatt.connected||!writer)return notify('Remote disconnected. Pair remote again.');
  starting=true;running=true;waitingForAck=true;ackRx=[];sessionReadings=[];seconds=40;lastFrame=0;lastPacket=0;rx=[];samples=[];display(null);
@@ -54,7 +56,7 @@ function startCountdown(){
   if(seconds<=0)finish(true);
  },1000);
 }
-$('confirmScan').onclick=beginScan;$('cancelScan').onclick=()=>$('scanDialog').close();
+$('confirmScan').onclick=beginScan;$('cancelScan').onclick=()=>closeDialog('scanDialog');
 async function finish(save){clearInterval(timer);clearTimeout(ackTimer);waitingForAck=false;ackRx=[];running=false;$('profile').disabled=false;$('start').classList.remove('scanning');$('start').setAttribute('aria-label','Start health scan');if(connected){try{await command(3)}catch(e){notify('Stop command failed: '+e.message)}}$('countdown').textContent='Start';$('ringCaption').textContent='Start Monitoring';$('progressArc').setAttribute('stroke-dashoffset','661.619');$('sessionLabel').textContent='READY';$('sessionTitle').textContent=save?'Session complete':'Select this panel to scan';$('sessionCopy').textContent='Press OK to start';if(save&&sessionReadings.length){const avg={};for(const k of ['hr','spo','hrv','micro','fatigue'])avg[k]=Math.round(sessionReadings.reduce((s,v)=>s+v[k],0)/sessionReadings.length);const r={...avg,id:crypto.randomUUID(),user:users.find(u=>u.id===active).name,date:new Date().toISOString(),source:'Live sensor',count:sessionReadings.length,wave:samples.slice()};reports.unshift(r);display(avg);showReport(r);notify('Measurement complete. Your report is available in Reports & history.')}else if(save)notify('No valid sensor frames received. No report was saved.');else notify('Measurement cancelled. No report was saved.')}
 $('start').onclick=start;$('stop').onclick=()=>finish(false);
 let historyMetric='Report';const metricKeys={'Report':'hr','Heart Rate':'hr','SpO2':'spo','Microcirculation':'micro','HRV':'hrv','Blood Pressure':'bp','Fatigue':'fatigue'};
@@ -72,7 +74,7 @@ const bluetoothDiagnostics=document.createElement('section');
 bluetoothDiagnostics.id='bluetoothDiagnostics';
 $('remoteDialog').insertBefore(bluetoothDiagnostics,$('remoteHelp'));
 const bluetoothDiagnosticStyle=document.createElement('style');
-bluetoothDiagnosticStyle.textContent='#remoteDialog{width:900px;max-height:92vh;overflow:auto}#bluetoothDiagnostics{margin:18px 0 22px;padding:18px;background:#0f0c0b;border:1px solid #4a3f38;border-left:6px solid var(--green);border-radius:8px}#bluetoothDiagnostics h3{font-size:24px;margin:0 0 14px}.diagnosticRows{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}.diagnosticRows>div{display:grid;grid-template-columns:210px 1fr;gap:12px;padding:8px 10px;background:#1c1714}.diagnosticRows span{color:var(--muted)}.diagnosticRows strong{font-family:Consolas,monospace;font-size:16px;overflow-wrap:anywhere}.diagnosticRows>div:nth-child(7){grid-column:1/-1}.diagnosticRows>div:nth-child(7) strong{max-height:90px;overflow:auto}@media(max-width:849px){#remoteDialog{width:94vw}.diagnosticRows{grid-template-columns:1fr}.diagnosticRows>div:nth-child(7){grid-column:auto}.diagnosticRows>div{grid-template-columns:150px 1fr}.diagnosticRows strong{font-size:13px}}';
+bluetoothDiagnosticStyle.textContent='.dialogFallback{display:block!important;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1000;box-shadow:0 0 0 100vmax rgba(0,0,0,.75)}#remoteDialog{width:900px;max-height:92vh;overflow:auto}#bluetoothDiagnostics{margin:18px 0 22px;padding:18px;background:#0f0c0b;border:1px solid #4a3f38;border-left:6px solid var(--green);border-radius:8px}#bluetoothDiagnostics h3{font-size:24px;margin:0 0 14px}.diagnosticRows{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}.diagnosticRows>div{display:grid;grid-template-columns:210px 1fr;gap:12px;padding:8px 10px;background:#1c1714}.diagnosticRows span{color:var(--muted)}.diagnosticRows strong{font-family:Consolas,monospace;font-size:16px;overflow-wrap:anywhere}.diagnosticRows>div:nth-child(7){grid-column:1/-1}.diagnosticRows>div:nth-child(7) strong{max-height:90px;overflow:auto}@media(max-width:849px){#remoteDialog{width:94vw}.diagnosticRows{grid-template-columns:1fr}.diagnosticRows>div:nth-child(7){grid-column:auto}.diagnosticRows>div{grid-template-columns:150px 1fr}.diagnosticRows strong{font-size:13px}}';
 document.head.append(bluetoothDiagnosticStyle);
 function renderBluetoothDiagnostics(attempt=bluetoothAttempt){
  const values={
@@ -101,7 +103,7 @@ async function connect(){
   permittedRemotes=[];$('remoteList').innerHTML='';$('remoteEmpty').hidden=false;
   $('remoteHelp').textContent='This browser does not expose the Web Bluetooth device chooser. Record the diagnostics below for the TitanOS investigation.';
   notify('Web Bluetooth is unavailable in this browser. Diagnostics are displayed on screen.');
-  $('remoteDialog').showModal();return;
+  openDialog('remoteDialog');return;
  }
  $('connect').disabled=true;
  try{
@@ -111,22 +113,22 @@ async function connect(){
   $('remoteHelp').textContent=permittedRemotes.length?'Select a saved remote, or find another paired or nearby remote.':'Windows pairing and website access are separate. Select Find once to authorize this remote for the website.';
   document.querySelectorAll('[data-remote]').forEach(button=>button.onclick=()=>connectDevice(permittedRemotes[Number(button.dataset.remote)]));
   renderBluetoothDiagnostics();
-  $('remoteDialog').showModal();
+  openDialog('remoteDialog');
  }catch(e){bluetoothAttempt={status:'getDevices failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();notify('Could not read saved remotes: '+e.message)}finally{$('connect').disabled=false}
 }
 async function requestRemote(){
- $('remoteDialog').close();
+ closeDialog('remoteDialog');
  try{
   bluetoothAttempt={status:'requestDevice started'};renderBluetoothDiagnostics();
   notify('Select the health remote in the browser list. A Windows-paired remote must be awake and advertising.');
   const selected=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[uuid('ff00')]});
   bluetoothAttempt={status:'Device selected: '+(selected.name||'unnamed device')};renderBluetoothDiagnostics();
   await connectDevice(selected);
- }catch(e){bluetoothAttempt={status:'requestDevice failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();notify(e.name==='NotFoundError'?'No remote selected. Wake the remote or put it in pairing mode, then try again. Windows pairing alone does not grant a website access.':'Could not select the remote: '+e.message);if(!$('remoteDialog').open)$('remoteDialog').showModal()}
+ }catch(e){bluetoothAttempt={status:'requestDevice failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();notify(e.name==='NotFoundError'?'No remote selected. Wake the remote or put it in pairing mode, then try again. Windows pairing alone does not grant a website access.':'Could not select the remote: '+e.message);if(!$('remoteDialog').open)openDialog('remoteDialog')}
 }
 async function connectDevice(selected){
  if(!selected)return;
- $('remoteDialog').close();$('connect').disabled=true;device=selected;let pairingStage='connection';
+ closeDialog('remoteDialog');$('connect').disabled=true;device=selected;let pairingStage='connection';
  notify('Connecting to '+(device.name||'health remote')+'…');
  try{
   const server=device.gatt.connected?device.gatt:await device.gatt.connect();
@@ -138,7 +140,7 @@ async function connectDevice(selected){
   device.addEventListener('gattserverdisconnected',()=>{connected=false;writer=null;if(running)finish(false);samples=[];rx=[];$('deviceName').textContent='Pair remote';$('connect').classList.remove('connected');$('subtitle').textContent='Live sensor mode · Pair remote to scan';$('modeBadge').textContent='LIVE SENSOR MODE';$('waveLabel').textContent='Waiting for remote connection';$('signalLabel').textContent='NO SIGNAL';latest=null;display(null);notify('Remote disconnected. Select Pair remote to reconnect the saved remote.')},{once:true});
  }catch(e){bluetoothAttempt={status:'GATT '+pairingStage+' failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();if(device?.gatt.connected)device.gatt.disconnect();writer=null;connected=false;$('deviceName').textContent='Pair remote';$('connect').classList.remove('connected');notify(pairingStage==='service'&&e.name==='NotFoundError'?'This device does not expose the required health-sensor service (FF00).':pairingStage==='characteristics'&&e.name==='NotFoundError'?'The selected remote lacks the expected health-sensor channels.':'Connection failed during '+pairingStage+': '+e.message)}finally{$('connect').disabled=false}
 }
-$('cancelRemote').onclick=()=>$('remoteDialog').close();
+$('cancelRemote').onclick=()=>closeDialog('remoteDialog');
 $('findRemote').onclick=requestRemote;
 $('connect').onclick=connect;
 const canvas=$('wave'),ctx=canvas.getContext('2d');let tick=0;function draw(){const w=canvas.clientWidth,h=canvas.clientHeight,dpr=devicePixelRatio||1;if(w&&h){if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);ctx.strokeStyle='#2d241f';ctx.fillStyle='#a09c95';ctx.font='19px Arial';ctx.lineWidth=1;for(const n of [300,150,0]){const y=h-24-n/300*(h-44);ctx.beginPath();ctx.moveTo(50,y);ctx.lineTo(w-20,y);ctx.stroke();ctx.fillText(String(n),8,y+6)}if(samples.length){ctx.beginPath();ctx.strokeStyle='#35c759';ctx.lineWidth=3;for(let x=50;x<w-20;x++){const v=samples[Math.min(samples.length-1,Math.floor((x-50)/(w-70)*samples.length))]+128;const y=h-24-v/300*(h-44);if(x===50)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();if(!matchMedia('(prefers-reduced-motion: reduce)').matches)tick+=1.1}}requestAnimationFrame(draw)}
