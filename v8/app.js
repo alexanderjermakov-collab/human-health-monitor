@@ -67,10 +67,42 @@ $('download').onclick=()=>{const safe=v=>'"'+String(v).replace(/^[=+@-]/,"'$&").
 const uuid=n=>`0000${n}-0000-1000-8000-00805f9b34fb`;
 function receive(e){if(!running||waitingForAck)return;rx.push(...new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength));while(rx.length>=92){if(rx[0]!==170||rx[1]!==92||rx[2]!==16||rx[3]!==255){rx.shift();continue}const f=rx.slice(0,92);if((f.slice(0,91).reduce((s,v)=>s+v,0)&255)!==f[91]){rx.shift();continue}rx.splice(0,92);lastPacket=Date.now();samples.push(...f.slice(4,68).map(v=>v>127?v-256:v));samples=samples.slice(-512);if(!f[68]||!f[69]){display(null);$('waveLabel').textContent='Receiving pulse signal · calculating readings';$('sessionCopy').textContent='Keep your finger still on the sensor';notify('Sensor signal received. Waiting for heart rate and oxygen readings. Keep your finger covering the sensor.');continue}latest={hr:f[68],spo:f[69],micro:f[70],fatigue:f[71],hrv:f[79]};lastFrame=Date.now();sessionReadings.push({...latest});display(latest);$('sessionCopy').textContent='Receiving live sensor readings';$('waveLabel').textContent='Live sensor waveform';notify('Receiving measurements from '+(device?.name||'remote')+'. Blood-pressure values remain estimates.');}if(rx.length>4096)rx=[]}
 let permittedRemotes=[];
+let bluetoothAttempt={status:'Not started'};
+const bluetoothDiagnostics=document.createElement('section');
+bluetoothDiagnostics.id='bluetoothDiagnostics';
+$('remoteDialog').insertBefore(bluetoothDiagnostics,$('remoteHelp'));
+const bluetoothDiagnosticStyle=document.createElement('style');
+bluetoothDiagnosticStyle.textContent='#remoteDialog{width:900px;max-height:92vh;overflow:auto}#bluetoothDiagnostics{margin:18px 0 22px;padding:18px;background:#0f0c0b;border:1px solid #4a3f38;border-left:6px solid var(--green);border-radius:8px}#bluetoothDiagnostics h3{font-size:24px;margin:0 0 14px}.diagnosticRows{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}.diagnosticRows>div{display:grid;grid-template-columns:210px 1fr;gap:12px;padding:8px 10px;background:#1c1714}.diagnosticRows span{color:var(--muted)}.diagnosticRows strong{font-family:Consolas,monospace;font-size:16px;overflow-wrap:anywhere}.diagnosticRows>div:nth-child(7){grid-column:1/-1}.diagnosticRows>div:nth-child(7) strong{max-height:90px;overflow:auto}@media(max-width:849px){#remoteDialog{width:94vw}.diagnosticRows{grid-template-columns:1fr}.diagnosticRows>div:nth-child(7){grid-column:auto}.diagnosticRows>div{grid-template-columns:150px 1fr}.diagnosticRows strong{font-size:13px}}';
+document.head.append(bluetoothDiagnosticStyle);
+function renderBluetoothDiagnostics(attempt=bluetoothAttempt){
+ const values={
+  secureContext:window.isSecureContext,
+  protocol:location.protocol,
+  bluetoothProperty:'bluetooth' in navigator,
+  bluetoothObject:typeof navigator.bluetooth,
+  getDevices:typeof navigator.bluetooth?.getDevices,
+  requestDevice:typeof navigator.bluetooth?.requestDevice,
+  userAgent:navigator.userAgent,
+  requestStatus:attempt.status,
+  errorName:attempt.errorName||'—',
+  errorMessage:attempt.errorMessage||'—'
+ };
+ const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
+ bluetoothDiagnostics.innerHTML='<h3>Browser / Bluetooth diagnostics</h3><div class="diagnosticRows">'+Object.entries(values).map(([key,value])=>`<div><span>${labels[key]}</span><strong>${esc(value)}</strong></div>`).join('')+'</div>';
+ console.info('[HHM V8 Bluetooth diagnostics]',values);
+ return values;
+}
 async function connect(){
  if(running)return notify('Finish or cancel the measurement before connecting.');
  if(connected){device.gatt.disconnect();return}
- if(!navigator.bluetooth)return notify('Bluetooth requires desktop Chrome or Edge over HTTPS.');
+ const diagnostics=renderBluetoothDiagnostics();
+ $('findRemote').disabled=diagnostics.requestDevice!=='function';
+ if(!diagnostics.bluetoothProperty||diagnostics.requestDevice!=='function'){
+  permittedRemotes=[];$('remoteList').innerHTML='';$('remoteEmpty').hidden=false;
+  $('remoteHelp').textContent='This browser does not expose the Web Bluetooth device chooser. Record the diagnostics below for the TitanOS investigation.';
+  notify('Web Bluetooth is unavailable in this browser. Diagnostics are displayed on screen.');
+  $('remoteDialog').showModal();return;
+ }
  $('connect').disabled=true;
  try{
   permittedRemotes=typeof navigator.bluetooth.getDevices==='function'?await navigator.bluetooth.getDevices():[];
@@ -78,16 +110,19 @@ async function connect(){
   $('remoteEmpty').hidden=permittedRemotes.length>0;
   $('remoteHelp').textContent=permittedRemotes.length?'Select a saved remote, or find another paired or nearby remote.':'Windows pairing and website access are separate. Select Find once to authorize this remote for the website.';
   document.querySelectorAll('[data-remote]').forEach(button=>button.onclick=()=>connectDevice(permittedRemotes[Number(button.dataset.remote)]));
+  renderBluetoothDiagnostics();
   $('remoteDialog').showModal();
- }catch(e){notify('Could not read saved remotes: '+e.message)}finally{$('connect').disabled=false}
+ }catch(e){bluetoothAttempt={status:'getDevices failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();notify('Could not read saved remotes: '+e.message)}finally{$('connect').disabled=false}
 }
 async function requestRemote(){
  $('remoteDialog').close();
  try{
+  bluetoothAttempt={status:'requestDevice started'};renderBluetoothDiagnostics();
   notify('Select the health remote in the browser list. A Windows-paired remote must be awake and advertising.');
   const selected=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[uuid('ff00')]});
+  bluetoothAttempt={status:'Device selected: '+(selected.name||'unnamed device')};renderBluetoothDiagnostics();
   await connectDevice(selected);
- }catch(e){notify(e.name==='NotFoundError'?'No remote selected. Wake the remote or put it in pairing mode, then try again. Windows pairing alone does not grant a website access.':'Could not select the remote: '+e.message)}
+ }catch(e){bluetoothAttempt={status:'requestDevice failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();notify(e.name==='NotFoundError'?'No remote selected. Wake the remote or put it in pairing mode, then try again. Windows pairing alone does not grant a website access.':'Could not select the remote: '+e.message);if(!$('remoteDialog').open)$('remoteDialog').showModal()}
 }
 async function connectDevice(selected){
  if(!selected)return;
@@ -101,7 +136,7 @@ async function connectDevice(selected){
   const dataChar=await service.getCharacteristic(uuid('ff03'));dataChar.addEventListener('characteristicvaluechanged',receive);await dataChar.startNotifications();
   connected=true;rx=[];samples=[];display(null);$('deviceName').textContent=device.name||'Health sensor';$('connect').classList.add('connected');$('subtitle').textContent='Live sensor mode · Ready to scan';$('modeBadge').textContent='SENSOR · EXPERIMENTAL';$('waveLabel').textContent='Sensor waveform · experimental decoding';$('signalLabel').textContent='WAITING FOR DATA';$('sessionCopy').textContent='Start a 40-second sensor measurement.';notify('Sensor connected. This remote will be offered directly next time in this browser.');
   device.addEventListener('gattserverdisconnected',()=>{connected=false;writer=null;if(running)finish(false);samples=[];rx=[];$('deviceName').textContent='Pair remote';$('connect').classList.remove('connected');$('subtitle').textContent='Live sensor mode · Pair remote to scan';$('modeBadge').textContent='LIVE SENSOR MODE';$('waveLabel').textContent='Waiting for remote connection';$('signalLabel').textContent='NO SIGNAL';latest=null;display(null);notify('Remote disconnected. Select Pair remote to reconnect the saved remote.')},{once:true});
- }catch(e){if(device?.gatt.connected)device.gatt.disconnect();writer=null;connected=false;$('deviceName').textContent='Pair remote';$('connect').classList.remove('connected');notify(pairingStage==='service'&&e.name==='NotFoundError'?'This device does not expose the required health-sensor service (FF00).':pairingStage==='characteristics'&&e.name==='NotFoundError'?'The selected remote lacks the expected health-sensor channels.':'Connection failed during '+pairingStage+': '+e.message)}finally{$('connect').disabled=false}
+ }catch(e){bluetoothAttempt={status:'GATT '+pairingStage+' failed',errorName:e.name||'Error',errorMessage:e.message||String(e)};renderBluetoothDiagnostics();if(device?.gatt.connected)device.gatt.disconnect();writer=null;connected=false;$('deviceName').textContent='Pair remote';$('connect').classList.remove('connected');notify(pairingStage==='service'&&e.name==='NotFoundError'?'This device does not expose the required health-sensor service (FF00).':pairingStage==='characteristics'&&e.name==='NotFoundError'?'The selected remote lacks the expected health-sensor channels.':'Connection failed during '+pairingStage+': '+e.message)}finally{$('connect').disabled=false}
 }
 $('cancelRemote').onclick=()=>$('remoteDialog').close();
 $('findRemote').onclick=requestRemote;
