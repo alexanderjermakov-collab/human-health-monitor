@@ -91,9 +91,10 @@ function renderBluetoothDiagnostics(attempt=bluetoothAttempt){
  };
  const labels={secureContext:'Secure context',protocol:'Protocol',bluetoothProperty:'navigator.bluetooth present',bluetoothObject:'Bluetooth object',getDevices:'getDevices()',requestDevice:'requestDevice()',userAgent:'User agent',requestStatus:'Last request',errorName:'Error name',errorMessage:'Error message'};
  bluetoothDiagnostics.innerHTML='<h3>Browser / Bluetooth diagnostics</h3><div class="diagnosticRows">'+Object.entries(values).map(([key,value])=>`<div><span>${labels[key]}</span><strong>${esc(value)}</strong></div>`).join('')+'</div>';
- console.info('[HHM V8 Bluetooth diagnostics]',values);
+ console.info('[HHM V8 Bluetooth diagnostics] '+JSON.stringify(values));
  return values;
 }
+renderBluetoothDiagnostics();
 async function connect(){
  if(running)return notify('Finish or cancel the measurement before connecting.');
  if(connected){device.gatt.disconnect();return}
